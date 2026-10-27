@@ -7,7 +7,8 @@
   "type": "desktop",
   "capabilities": ["desktop-widget"],
   "component": "./src/StickyNotes.qml",
+  "settings": "./src/StickyNotesSettings.qml",
   "icon": "sticky_note_2",
-  "permissions": ["process"],
+  "permissions": ["process", "settings_read", "settings_write"],
   "requires_dms": ">=2.0.0"
 }

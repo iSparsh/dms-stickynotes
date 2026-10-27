@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
@@ -30,6 +29,7 @@ Item {
     property var trash: null
     property var deskIds: []
     property var hitRegions: []
+    property int settingsRevision: 0
     // Pointer gestures that start on the stack surface. The stack itself never
     // moves mid-gesture, so its local coordinates stay stable; the desk surface
     // draws the moving preview and the result is applied on release.
@@ -40,9 +40,14 @@ Item {
     property bool dropHover: false
     readonly property var colors: ["#fff1a8", "#ffd1d3", "#cfeccf", "#cfe7f6", "#e4d8f5", "#fbe1c3"]
     readonly property var fonts: ["Gochi Hand", "Sans Serif", "Monospace"]
-    readonly property var fontLabels: ["Handwriting", "Sans", "Mono"]
+    readonly property var fontLabels: ["Handwriting", "Shell font", "Mono"]
+    readonly property string handFont: setting("handwritingFont", "Gochi Hand") || "Gochi Hand"
+    readonly property real textScale: setting("textSize", 100) / 100
+    readonly property string notesFolder: resolveFolder(setting("notesFolder", ""))
     readonly property color ink: "#3f3528"
-    readonly property real margin: 12
+    readonly property real band: Theme.iconSize + Theme.spacingXS
+    readonly property real buttonSize: Theme.iconSize + Theme.spacingXXS
+    readonly property real margin: Theme.spacingM
     readonly property real sheetWidth: 240
     readonly property real sheetHeight: 240
     readonly property var stackNotes: notes.filter((n) => {
@@ -51,7 +56,7 @@ Item {
     readonly property var activeNote: stackNotes.length ? stackNotes[Math.max(0, Math.min(current, stackNotes.length - 1))] : null
     readonly property string activeId: activeNote ? activeNote.id : ""
     readonly property string activeText: activeNote ? activeNote.text : ""
-    readonly property bool chrome: hover.hovered || editor.activeFocus
+    readonly property bool chrome: hover.hovered || editor.editing
     // Dux's content loader is our parent and carries the widget geometry, which
     // gives the stack's on-screen origin and Dux's own position saving.
     readonly property var hostGeometry: parent && parent.geometry !== undefined ? parent.geometry : null
@@ -75,12 +80,47 @@ Item {
         }) || null;
     }
 
+    // Per-instance settings, falling back to the plugin-wide ones.
+    function setting(key, fallback) {
+        void instanceData;
+        void settingsRevision;
+        return pluginService ? pluginService.loadPluginData(pluginId, key, fallback) : fallback;
+    }
+
+    function resolveFolder(path) {
+        const home = Quickshell.env("HOME");
+        if (!path)
+            return (Quickshell.env("XDG_DATA_HOME") || home + "/.local/share") + "/sticky-notes";
+
+        return path.trim().replace(/^~(?=\/|$)/, home).replace(/\/+$/, "");
+    }
+
+    function openStore() {
+        if (saveTimer.running)
+            persist();
+
+        ready = false;
+        notes = [];
+        lastWritten = "";
+        problem = "";
+        store.path = "";
+        makeFolder.running = false;
+        makeFolder.running = true;
+    }
+
     function fontFamily(name) {
-        return name === "Sans Serif" || name === "Monospace" ? name : "Gochi Hand";
+        if (name === "Sans Serif")
+            return Theme.fontFamily;
+
+        if (name === "Monospace")
+            return Theme.monoFontFamily;
+
+        return handFont;
     }
 
     function fontSize(name) {
-        return name === "Sans Serif" || name === "Monospace" ? 15 : 20;
+        const base = name === "Sans Serif" || name === "Monospace" ? Theme.fontSizeLarge : Theme.fontSizeXLarge;
+        return Math.round(base * textScale);
     }
 
     function nextFont(name) {
@@ -118,6 +158,11 @@ Item {
             return ;
 
         saveTimer.stop();
+        // Nothing was loaded and nothing has been written yet, so an empty
+        // save could only overwrite a file this stack never saw.
+        if (!lastWritten && !notes.length)
+            return ;
+
         lastWritten = JSON.stringify({
             "version": 1,
             "notes": notes
@@ -306,8 +351,9 @@ Item {
     }
 
     onActiveIdChanged: syncEditor()
+    onNotesFolderChanged: openStore()
     onActiveTextChanged: {
-        if (!editor.activeFocus && editor.text !== activeText)
+        if (!editor.editing && editor.text !== activeText)
             syncEditor();
 
     }
@@ -341,14 +387,25 @@ Item {
         onTriggered: root.trash = null
     }
 
-    Process {
-        readonly property string folder: Quickshell.env("HOME") + "/Documents/sticky-notes"
+    Connections {
+        function onPluginDataChanged(changedPluginId) {
+            if (changedPluginId === root.pluginId)
+                root.settingsRevision++;
 
-        command: ["mkdir", "-p", folder]
+        }
+
+        target: root.pluginService
+        enabled: root.pluginService !== null
+    }
+
+    Process {
+        id: makeFolder
+
+        command: ["mkdir", "-p", root.notesFolder]
         running: true
         onExited: (code) => {
             if (code === 0)
-                store.path = folder + "/notes.json";
+                store.path = root.notesFolder + "/notes.json";
             else
                 root.problem = "Couldn't create the notes folder";
         }
@@ -447,7 +504,7 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
-                radius: 2
+                radius: Theme.cornerRadiusXXS
                 color: "transparent"
                 border.width: 2
                 border.color: Qt.rgba(0.25, 0.2, 0.1, 0.35)
@@ -461,7 +518,7 @@ Item {
                 property point pressAt
 
                 width: parent.width
-                height: 30
+                height: root.band
                 cursorShape: pressed && root.movingStack ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                 onPressed: (mouse) => {
                     return pressAt = Qt.point(mouse.x, mouse.y);
@@ -492,8 +549,8 @@ Item {
 
             Row {
                 anchors.right: parent.right
-                anchors.rightMargin: 4
-                y: 2
+                anchors.rightMargin: Theme.spacingXS
+                y: (root.band - root.buttonSize) / 2
                 spacing: 0
 
                 IconButton {
@@ -505,14 +562,14 @@ Item {
                 }
 
                 Text {
-                    height: 26
-                    leftPadding: 2
-                    rightPadding: 2
+                    height: root.buttonSize
+                    leftPadding: Theme.spacingXXS
+                    rightPadding: Theme.spacingXXS
                     verticalAlignment: Text.AlignVCenter
                     visible: root.stackNotes.length > 1
                     text: (root.current + 1) + " / " + root.stackNotes.length
-                    font.pixelSize: 11
-                    font.family: "Sans Serif"
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.family: Theme.fontFamily
                     color: root.ink
                     opacity: 0.55
                 }
@@ -535,80 +592,78 @@ Item {
 
             }
 
-            ScrollView {
-                id: scroller
+            DTextEdit {
+                id: editor
 
-                clip: true
-                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                property bool syncing: false
+                property bool editing: false
+
+                enabled: root.ready
+                backgroundColor: "transparent"
+                borderWidth: 0
+                focusedBorderWidth: 0
+                topPadding: Theme.spacingXS
+                textColor: root.ink
+                placeholderColor: Qt.rgba(0.25, 0.2, 0.15, 0.45)
+                hidePlaceholderOnFocus: false
+                font.family: root.fontFamily(root.activeNote ? root.activeNote.font : root.fonts[0])
+                font.pixelSize: root.fontSize(root.activeNote ? root.activeNote.font : root.fonts[0])
+                placeholderText: !root.ready ? (root.problem || "Opening notes…") : root.activeNote ? "Write something…" : "Start typing to add a note"
+                keyForwardTargets: [editorKeys]
+                onFocusStateChanged: (hasFocus) => {
+                    return editing = hasFocus;
+                }
+                onTextEdited: {
+                    if (syncing || !editing)
+                        return ;
+
+                    if (root.activeNote)
+                        root.update(root.activeId, {
+                        "text": text
+                    });
+                    else if (text.length)
+                        root.addNote(text);
+                }
 
                 anchors {
                     fill: parent
-                    topMargin: 30
-                    bottomMargin: 36
-                }
-
-                TextArea {
-                    id: editor
-
-                    property bool syncing: false
-
-                    leftPadding: 14
-                    rightPadding: 14
-                    topPadding: 4
-                    enabled: root.ready
-                    wrapMode: TextEdit.Wrap
-                    color: root.ink
-                    selectionColor: Qt.rgba(0.25, 0.2, 0.1, 0.25)
-                    selectedTextColor: root.ink
-                    font.family: root.fontFamily(root.activeNote ? root.activeNote.font : root.fonts[0])
-                    font.pixelSize: root.fontSize(root.activeNote ? root.activeNote.font : root.fonts[0])
-                    placeholderText: text.length ? "" : !root.ready ? (root.problem || "Opening notes…") : root.activeNote ? "Write something…" : "Start typing to add a note"
-                    placeholderTextColor: Qt.rgba(0.25, 0.2, 0.15, 0.4)
-                    onTextChanged: {
-                        if (syncing || !activeFocus)
-                            return ;
-
-                        if (root.activeNote)
-                            root.update(root.activeId, {
-                            "text": text
-                        });
-                        else if (text.length)
-                            root.addNote(text);
-                    }
-                    Keys.onPressed: (event) => {
-                        const ctrl = event.modifiers & Qt.ControlModifier;
-                        if (event.key === Qt.Key_Escape)
-                            focus = false;
-                        else if (ctrl && event.key === Qt.Key_N)
-                            root.addNote("");
-                        else if (ctrl && event.key === Qt.Key_PageUp)
-                            root.navigate(-1);
-                        else if (ctrl && event.key === Qt.Key_PageDown)
-                            root.navigate(1);
-                        else if (ctrl && event.key === Qt.Key_S)
-                            root.persist();
-                        else
-                            return ;
-                        event.accepted = true;
-                    }
-
-                    background: Item {
-                    }
-
+                    topMargin: root.band
+                    bottomMargin: root.band + Theme.spacingS
                 }
 
             }
 
+            Item {
+                id: editorKeys
+
+                Keys.onPressed: (event) => {
+                    const ctrl = event.modifiers & Qt.ControlModifier;
+                    if (event.key === Qt.Key_Escape)
+                        editor.setFocus(false);
+                    else if (ctrl && event.key === Qt.Key_N)
+                        root.addNote("");
+                    else if (ctrl && event.key === Qt.Key_PageUp)
+                        root.navigate(-1);
+                    else if (ctrl && event.key === Qt.Key_PageDown)
+                        root.navigate(1);
+                    else if (ctrl && event.key === Qt.Key_S)
+                        root.persist();
+                    else
+                        return ;
+                    event.accepted = true;
+                }
+            }
+
             Row {
-                height: 26
-                spacing: 2
+                height: root.buttonSize
+                spacing: Theme.spacingXXS
                 visible: root.chrome && !!root.activeNote && !root.trash
 
                 anchors {
                     left: parent.left
-                    leftMargin: 10
+                    leftMargin: Theme.spacingS
                     bottom: parent.bottom
-                    bottomMargin: 5
+                    bottomMargin: Theme.spacingXS
                 }
 
                 Swatches {
@@ -622,7 +677,7 @@ Item {
                 }
 
                 Item {
-                    width: 4
+                    width: Theme.spacingXS
                     height: 1
                 }
 
@@ -644,47 +699,46 @@ Item {
 
             // Undo / problem banner, in place of the toolbar.
             Rectangle {
-                height: 26
-                radius: 13
-                color: Qt.rgba(0.25, 0.2, 0.12, 0.88)
+                height: root.buttonSize
+                radius: height / 2
+                color: Theme.inverseSurface
                 visible: !!root.trash || (root.problem !== "" && root.ready)
 
                 anchors {
                     left: parent.left
                     right: parent.right
                     bottom: parent.bottom
-                    margins: 6
+                    margins: Theme.spacingXS
                 }
 
                 Text {
                     anchors.left: parent.left
-                    anchors.leftMargin: 12
+                    anchors.leftMargin: Theme.spacingM
                     anchors.right: undo.left
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.trash ? "Note deleted" : root.problem
                     elide: Text.ElideRight
-                    color: "white"
-                    font.pixelSize: 12
-                    font.family: "Sans Serif"
+                    color: Theme.inverseOnSurface
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.family: Theme.fontFamily
                 }
 
                 Text {
                     id: undo
 
                     anchors.right: parent.right
-                    anchors.rightMargin: 12
+                    anchors.rightMargin: Theme.spacingM
                     anchors.verticalCenter: parent.verticalCenter
                     visible: !!root.trash
-                    text: "UNDO"
-                    color: "#ffe58a"
-                    font.pixelSize: 11
-                    font.bold: true
-                    font.family: "Sans Serif"
-                    font.letterSpacing: 0.8
+                    text: "Undo"
+                    color: Theme.inversePrimary
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.weight: Font.Medium
+                    font.family: Theme.fontFamily
 
                     MouseArea {
                         anchors.fill: parent
-                        anchors.margins: -6
+                        anchors.margins: -Theme.spacingS
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.undoDelete()
                     }
@@ -781,9 +835,12 @@ Item {
                         root.tearing = false;
                     }
                     onCanceled: root.tearing = false
-                    ToolTip.visible: containsMouse && !pressed
-                    ToolTip.delay: 600
-                    ToolTip.text: "Drag to peel off"
+                }
+
+                DTooltipHost {
+                    text: "Drag to peel off"
+                    target: corner
+                    hoverArea: peel
                 }
 
                 Behavior on extent {
@@ -864,7 +921,7 @@ Item {
                 required property string modelData
                 readonly property var note: root.noteById(modelData)
                 readonly property string noteText: note ? note.text : ""
-                readonly property bool active: looseHover.hovered || looseEditor.activeFocus || dragging || sizing
+                readonly property bool active: looseHover.hovered || looseEditor.editing || dragging || sizing
                 property bool dragging: false
                 property bool sizing: false
                 property Region hit
@@ -897,10 +954,10 @@ Item {
                 width: note ? (note.w || root.sheetWidth) : root.sheetWidth
                 height: note ? (note.h || root.sheetHeight) : root.sheetHeight
                 z: note ? (note.z || 0) : 0
-                rotation: looseEditor.activeFocus || dragging || sizing ? 0 : root.tiltFor(modelData)
+                rotation: looseEditor.editing || dragging || sizing ? 0 : root.tiltFor(modelData)
                 scale: dragging ? 1.02 : 1
                 onNoteTextChanged: {
-                    if (!looseEditor.activeFocus && looseEditor.text !== noteText) {
+                    if (!looseEditor.editing && looseEditor.text !== noteText) {
                         looseEditor.syncing = true;
                         looseEditor.text = noteText;
                         looseEditor.syncing = false;
@@ -927,7 +984,7 @@ Item {
 
                     MouseArea {
                         width: parent.width
-                        height: 30
+                        height: root.band
                         cursorShape: loose.dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                         drag.target: loose
                         drag.threshold: 4
@@ -962,71 +1019,69 @@ Item {
 
                     IconButton {
                         anchors.right: parent.right
-                        anchors.rightMargin: 4
-                        y: 2
+                        anchors.rightMargin: Theme.spacingXS
+                        y: (root.band - root.buttonSize) / 2
                         icon: "stacks"
                         tip: "Put back on the stack (or drag it there)"
                         visible: loose.active
                         onClicked: root.returnToStack(loose.modelData)
                     }
 
-                    ScrollView {
-                        clip: true
-                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    DTextEdit {
+                        id: looseEditor
+
+                        property bool syncing: false
+                        property bool editing: false
+
+                        backgroundColor: "transparent"
+                        borderWidth: 0
+                        focusedBorderWidth: 0
+                        topPadding: Theme.spacingXS
+                        textColor: root.ink
+                        placeholderColor: Qt.rgba(0.25, 0.2, 0.15, 0.45)
+                        hidePlaceholderOnFocus: false
+                        font.family: root.fontFamily(loose.note ? loose.note.font : root.fonts[0])
+                        font.pixelSize: root.fontSize(loose.note ? loose.note.font : root.fonts[0])
+                        placeholderText: "Write something…"
+                        keyForwardTargets: [looseKeys]
+                        onFocusStateChanged: (hasFocus) => {
+                            editing = hasFocus;
+                            if (hasFocus)
+                                loose.raise();
+
+                        }
+                        onTextEdited: {
+                            if (!syncing && editing)
+                                root.update(loose.modelData, {
+                                "text": text
+                            });
+
+                        }
 
                         anchors {
                             fill: parent
-                            topMargin: 30
-                            bottomMargin: 34
-                        }
-
-                        TextArea {
-                            id: looseEditor
-
-                            property bool syncing: false
-
-                            leftPadding: 14
-                            rightPadding: 14
-                            topPadding: 4
-                            wrapMode: TextEdit.Wrap
-                            color: root.ink
-                            selectionColor: Qt.rgba(0.25, 0.2, 0.1, 0.25)
-                            selectedTextColor: root.ink
-                            font.family: root.fontFamily(loose.note ? loose.note.font : root.fonts[0])
-                            font.pixelSize: root.fontSize(loose.note ? loose.note.font : root.fonts[0])
-                            placeholderText: text.length ? "" : "Write something…"
-                            placeholderTextColor: Qt.rgba(0.25, 0.2, 0.15, 0.4)
-                            onActiveFocusChanged: {
-                                if (activeFocus)
-                                    loose.raise();
-
-                            }
-                            onTextChanged: {
-                                if (!syncing && activeFocus)
-                                    root.update(loose.modelData, {
-                                    "text": text
-                                });
-
-                            }
-                            Keys.onEscapePressed: focus = false
-
-                            background: Item {
-                            }
-
+                            topMargin: root.band
+                            bottomMargin: root.band + Theme.spacingXS
                         }
 
                     }
 
+                    Item {
+                        id: looseKeys
+
+                        Keys.onEscapePressed: looseEditor.setFocus(false)
+                    }
+
                     Row {
-                        height: 26
-                        spacing: 2
+                        height: root.buttonSize
+                        spacing: Theme.spacingXXS
                         visible: loose.active
 
                         anchors {
                             left: parent.left
-                            leftMargin: 10
+                            leftMargin: Theme.spacingS
                             bottom: parent.bottom
-                            bottomMargin: 5
+                            bottomMargin: Theme.spacingXS
                         }
 
                         Swatches {
@@ -1040,7 +1095,7 @@ Item {
                         }
 
                         Item {
-                            width: 4
+                            width: Theme.spacingXS
                             height: 1
                         }
 
@@ -1066,8 +1121,8 @@ Item {
 
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
-                        width: 18
-                        height: 18
+                        width: Theme.iconSizeSmall + Theme.spacingXXS
+                        height: width
                         cursorShape: Qt.SizeFDiagCursor
                         onPressed: (mouse) => {
                             pressAt = mapToItem(loose.parent, mouse.x, mouse.y);
@@ -1089,15 +1144,13 @@ Item {
                             loose.rebind();
                         }
 
-                        Text {
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.margins: 2
+                        DIcon {
+                            anchors.centerIn: parent
                             visible: loose.active
-                            text: "◢"
-                            font.pixelSize: 10
+                            name: "south_east"
+                            size: Theme.iconSizeSmall
                             color: root.ink
-                            opacity: 0.3
+                            opacity: 0.35
                         }
 
                     }
@@ -1141,8 +1194,8 @@ Item {
 
             Text {
                 anchors.fill: parent
-                anchors.topMargin: 34
-                anchors.margins: 14
+                anchors.topMargin: root.band + Theme.spacingXS
+                anchors.margins: Theme.spacingM
                 text: root.activeText
                 wrapMode: Text.Wrap
                 elide: Text.ElideRight
@@ -1161,7 +1214,7 @@ Item {
             z: 100000
             width: root.width - 2 * root.margin
             height: root.height - 2 * root.margin
-            radius: 2
+            radius: Theme.cornerRadiusXXS
             color: Qt.rgba(1, 1, 1, 0.12)
             border.width: 2
             border.color: Qt.rgba(0.25, 0.2, 0.12, 0.55)
@@ -1181,12 +1234,9 @@ Item {
 
         signal clicked()
 
-        width: 26
-        height: 26
+        width: root.buttonSize
+        height: root.buttonSize
         opacity: enabled ? 1 : 0.3
-        ToolTip.visible: area.containsMouse && tip !== ""
-        ToolTip.delay: 600
-        ToolTip.text: tip
 
         Rectangle {
             anchors.fill: parent
@@ -1198,7 +1248,7 @@ Item {
         DIcon {
             anchors.centerIn: parent
             name: button.icon
-            size: 17
+            size: Theme.iconSizeSmall
             color: root.ink
         }
 
@@ -1211,6 +1261,12 @@ Item {
             onClicked: button.clicked()
         }
 
+        DTooltipHost {
+            text: button.tip
+            target: button
+            hoverArea: area
+        }
+
     }
 
     component Swatches: Row {
@@ -1220,7 +1276,7 @@ Item {
 
         signal picked(string color)
 
-        spacing: 4
+        spacing: Theme.spacingXS
 
         Repeater {
             model: root.colors
@@ -1228,9 +1284,9 @@ Item {
             Rectangle {
                 required property string modelData
 
-                width: 16
-                height: 16
-                radius: 8
+                width: Theme.iconSizeSmall
+                height: width
+                radius: width / 2
                 anchors.verticalCenter: parent.verticalCenter
                 color: modelData
                 border.width: swatches.selected === modelData ? 2 : 1
@@ -1287,12 +1343,12 @@ Item {
             id: face
 
             anchors.fill: parent
-            radius: 2
+            radius: Theme.cornerRadiusXXS
 
             Rectangle {
                 visible: sheet.band
                 width: parent.width
-                height: 30
+                height: root.band
                 color: Qt.rgba(0.35, 0.25, 0.05, 0.06)
             }
 
