@@ -43,7 +43,8 @@ Item {
     readonly property var fontLabels: ["Handwriting", "Shell font", "Mono"]
     readonly property string handFont: setting("handwritingFont", "Gochi Hand") || "Gochi Hand"
     readonly property real textScale: setting("textSize", 100) / 100
-    readonly property string notesFolder: resolveFolder(setting("notesFolder", ""))
+    readonly property string customFolder: (setting("notesFolder", "") || "").trim()
+    readonly property string notesFolder: resolveFolder(customFolder)
     readonly property color ink: "#3f3528"
     readonly property real band: Theme.iconSize + Theme.spacingXS
     readonly property real buttonSize: Theme.iconSize + Theme.spacingXXS
@@ -92,7 +93,16 @@ Item {
         if (!path)
             return (Quickshell.env("XDG_DATA_HOME") || home + "/.local/share") + "/sticky-notes";
 
-        return path.trim().replace(/^~(?=\/|$)/, home).replace(/\/+$/, "");
+        return path.trim().replace(/^~(?=\/|$)/, home).replace(/(.)\/+$/, "$1");
+    }
+
+    // The default folder is created on demand; a folder chosen in the settings
+    // must already exist, so a typo can't silently start an empty stack.
+    function folderCommand() {
+        if (!customFolder)
+            return ["mkdir", "-p", notesFolder];
+
+        return ["test", "-d", notesFolder, "-a", "-w", notesFolder];
     }
 
     function openStore() {
@@ -105,6 +115,10 @@ Item {
         problem = "";
         store.path = "";
         makeFolder.running = false;
+        if (!notesFolder.startsWith("/")) {
+            problem = "Notes folder must be an absolute path or start with ~";
+            return ;
+        }
         makeFolder.running = true;
     }
 
@@ -401,11 +415,13 @@ Item {
     Process {
         id: makeFolder
 
-        command: ["mkdir", "-p", root.notesFolder]
+        command: root.folderCommand()
         running: true
         onExited: (code) => {
             if (code === 0)
                 store.path = root.notesFolder + "/notes.json";
+            else if (root.customFolder)
+                root.problem = "Notes folder doesn't exist or isn't writable: " + root.customFolder;
             else
                 root.problem = "Couldn't create the notes folder";
         }
