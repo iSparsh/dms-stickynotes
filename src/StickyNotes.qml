@@ -8,12 +8,6 @@ import qs.Common
 import qs.DCommon.Widgets
 
 Item {
-    // ── The stack ──────────────────────────────────────────────────────────
-    // ── The desk: one stationary, full-screen bottom-layer surface ─────────
-    // Loose sheets live here as ordinary items, so dragging them is just moving
-    // an item. The input mask is limited to the sheets, so clicks anywhere else
-    // fall through to the desktop.
-
     id: root
 
     property var pluginService: null
@@ -348,11 +342,13 @@ Item {
     }
 
     Process {
-        command: ["python3", Qt.resolvedUrl("init_store.py").toString().replace("file://", "")]
+        readonly property string folder: Quickshell.env("HOME") + "/Documents/sticky-notes"
+
+        command: ["mkdir", "-p", folder]
         running: true
         onExited: (code) => {
             if (code === 0)
-                store.path = Quickshell.env("HOME") + "/Documents/sticky-notes/notes.json";
+                store.path = folder + "/notes.json";
             else
                 root.problem = "Couldn't create the notes folder";
         }
@@ -390,7 +386,15 @@ Item {
                 console.warn("Sticky Notes: " + error);
             }
         }
-        onLoadFailed: root.problem = "Couldn't read notes.json"
+        onLoadFailed: (error) => {
+            // A missing file is a fresh start; the first save creates it.
+            if (error === FileViewError.FileNotFound) {
+                root.ready = true;
+                root.problem = "";
+            } else {
+                root.problem = "Couldn't read notes.json";
+            }
+        }
         onSaved: root.problem = ""
         onSaveFailed: root.problem = "Couldn't save — check folder permissions"
     }
@@ -830,6 +834,9 @@ Item {
 
     }
 
+    // Peeled sheets are ordinary items on one stationary, full-screen surface,
+    // so dragging one never moves a Wayland surface. The input mask covers only
+    // the sheets; clicks anywhere else reach the desktop.
     PanelWindow {
         id: desk
 
@@ -1053,7 +1060,6 @@ Item {
 
                     }
 
-                    // Resize grip.
                     MouseArea {
                         property point pressAt
                         property size startSize

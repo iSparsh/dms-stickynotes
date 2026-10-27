@@ -4,17 +4,15 @@
 
 - `plugin.json` registers `stickyNotes` as a Dux Shell 2.0 desktop plugin.
 - `src/StickyNotes.qml` implements the stack, the peeled-off sheets (drawn on one full-screen, input-masked bottom-layer surface) and the work-area probe.
-- `src/init_store.py` creates `~/Documents/sticky-notes/notes.json` without replacing an existing file.
-- `tests/` holds the Python tests for the store initializer.
+- Notes are stored in `~/Documents/sticky-notes/notes.json`; the folder is created with `mkdir -p` and the file on first save.
 
 ## Development
 
-Requires Python 3, Dux Shell 2.0, Quickshell and Qt's QML tools. Link the repository to `~/.config/dms/plugins/stickyNotes` and reload with `dms ipc call plugin-scan rescan stickyNotes`; errors appear in `journalctl --user -u dms`.
+Requires Dux Shell 2.0 and Qt's QML tools. Link the repository to `~/.config/dms/plugins/stickyNotes` and reload with `dms ipc call plugin-scan rescan stickyNotes`; errors appear in `journalctl --user -u dms`.
 
 ## Checks
 
 ```sh
-python3 -m unittest discover -s tests -v
 qmlformat -i src/StickyNotes.qml
 ```
 

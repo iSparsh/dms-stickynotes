@@ -16,7 +16,7 @@ Install **Sticky Notes** from Dux Settings → Plugins, enable it, then add it u
 
 ## Local development
 
-Requires Dux Shell 2.0 or newer and Python 3 (used once to create the notes folder). The handwriting font is [Gochi Hand](https://fonts.google.com/specimen/Gochi+Hand); install it for the intended look, otherwise Qt falls back to another font. To work on it, link the repository into the Dux plugin directory and enable it as above:
+Requires Dux Shell 2.0 or newer; there are no other dependencies. The handwriting font is [Gochi Hand](https://fonts.google.com/specimen/Gochi+Hand); install it for the intended look, otherwise Qt falls back to another font. To work on it, link the repository into the Dux plugin directory and enable it as above:
 
 ```sh
 ln -s "$PWD" ~/.config/dms/plugins/stickyNotes
@@ -30,9 +30,7 @@ Notes are stored as UTF-8 JSON in `~/Documents/sticky-notes/notes.json`, created
 ## Checks
 
 ```sh
-python3 -m unittest discover -s tests -v
 qmlformat -n src/StickyNotes.qml >/dev/null
-qmllint src/StickyNotes.qml
 ```
 
 ## License
