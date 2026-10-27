@@ -18,7 +18,7 @@ Install **Sticky Notes** from Dux Settings → Plugins, enable it, then add it u
 
 Each stack has its own settings under Settings → Desktop Widgets:
 
-- **Notes folder**: where `notes.json` lives. Leave it empty for the default, which is created automatically. A folder you choose must already exist and be writable; the settings page checks it as you type, and the stack shows an error instead of creating a mistyped folder. Two stacks with different folders are independent.
+- **Notes folder**: where `notes.json` lives, chosen with Dux's folder browser (**Choose…**); **Use default** returns to `~/.local/share/sticky-notes`. If a chosen folder later disappears or becomes read-only, the stack shows an error instead of recreating it. Two stacks with different folders are independent.
 - **Handwriting font**: any installed font for the handwriting style. The other styles follow your shell and monospace fonts.
 - **Text size**: note text size relative to your shell font size.
 
