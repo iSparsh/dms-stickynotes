@@ -1,0 +1,13 @@
+{
+  "id": "stickyNotes",
+  "name": "Sticky Notes",
+  "description": "A stack of handwritten-style paper notes on your desktop; peel sheets off and stick them anywhere",
+  "version": "1.0.0",
+  "author": "iSparsh",
+  "type": "desktop",
+  "capabilities": ["desktop-widget"],
+  "component": "./src/StickyNotes.qml",
+  "icon": "sticky_note_2",
+  "permissions": ["process"],
+  "requires_dms": ">=2.0.0"
+}
